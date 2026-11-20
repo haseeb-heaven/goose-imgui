@@ -1,6 +1,5 @@
 // examples/support/support.goose — command line and screen-capture plumbing that
 // every demo shares, so each demo file is about its own UI and nothing else.
-namespace support;
 
 import imgui from "../..";
 import std;
@@ -103,4 +102,47 @@ fn finished(options: Options&, frame: i64) -> bool {
         return true;
     }
     return frame >= target;
+}
+
+
+fn main() {
+    var options = parse("Support", 900, 600);
+    if !begin(options) { return; }
+    defer imgui::shutdown();
+
+    imgui::dark_theme();
+
+    var frame = 0;
+    while imgui::frame() {
+        frame += 1;
+
+        imgui::set_next_window_pos(8.0, 8.0, imgui::ALWAYS);
+        imgui::set_next_window_size(
+            options.width - 16.0,
+            options.height - 16.0,
+            imgui::ALWAYS
+        );
+
+        if imgui::begin_window("Support", imgui::NONE) {
+            imgui::text("Support");
+            imgui::separator();
+
+            imgui::text(str("Driver: ", imgui::driver()));
+            imgui::text(str("ImGui: ", imgui::version()));
+            imgui::text(str("DPI: ", imgui::dpi_scale()));
+            imgui::text(str("FPS: ", imgui::fps()));
+
+            imgui::separator();
+
+            if imgui::button("Quit") {
+                imgui::quit();
+            }
+
+            imgui::end_window();
+        }
+
+        imgui::end_frame();
+
+        if finished(options, frame) { break; }
+    }
 }
