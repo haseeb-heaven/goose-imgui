@@ -1,8 +1,8 @@
 #!/bin/sh
-# Builds every demo and captures its screenshot.
+# Builds every example and captures its screenshot.
 #
-# Each demo renders offscreen, runs at least 30 frames and writes one real
-# frame as a PNG, so the images in screenshots/ are the demos' own output and
+# Each example renders offscreen, runs at least 30 frames and writes one real
+# frame as a PNG, so the images in screenshots/ are the examples' own output and
 # not hand-drawn mockups. Run from the repository root:
 #
 #     sh scripts/screenshots.sh
@@ -17,10 +17,11 @@ capture() {
     name="$1"
     size="$2"
     echo "== $name ($size)"
-    goose build "demos/$name/main.goose"
-    "./demos/$name/main" --shot "screenshots/$name.png" --frames 30 --size "$size"
+    goose build "examples/$name/main.goose"
+    "./examples/$name/main" --shot "screenshots/$name.png" --frames 30 --size "$size"
 }
 
+capture hello 480x240
 capture calculator 760x430
 capture showcase 880x470
 capture system_monitor 980x640

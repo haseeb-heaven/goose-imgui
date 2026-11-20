@@ -1,14 +1,18 @@
-// demos/system_monitor/main.goose — a live system monitor.
+// examples/system_monitor/main.goose — a live system monitor of this machine.
 //
-// Everything on screen is drawn from real numbers where they exist (frame
-// time, frames per second, frame count) and from a deterministic synthetic
-// load otherwise, so the demo looks the same on every machine and animates
-// while it runs. It is the demo to read for rolling plots, gauges drawn with
-// the draw list, a resizable two-column layout and a scrolling log.
+// Nothing on screen is invented: CPU load, memory in use, network throughput,
+// free disk, load average, uptime and the process table all come from the
+// operating system, through sysinfo.c (compiled with the program by
+// main.build: mach host statistics, sysctl and libproc on macOS, /proc on
+// Linux). Frame time and frames per second are measured by the binding. Where
+// a probe is unavailable the monitor says so instead of drawing a number.
 //
-//     goose build demos/system_monitor/main.goose
-//     ./demos/system_monitor/main
-//     ./demos/system_monitor/main --shot screenshots/system_monitor.png --frames 30
+// It is the example to read for rolling plots, gauges drawn with the draw list,
+// a resizable two-column layout, a virtual-feeling process table and a log.
+//
+//     goose build examples/system_monitor/main.goose
+//     ./examples/system_monitor/main
+//     ./examples/system_monitor/main --shot screenshots/system_monitor.png --frames 30
 
 import imgui from "../..";
 import imgui.raw;
@@ -17,13 +21,28 @@ import std;
 import math;
 import os;
 
+// sysinfo.c, compiled with this program (main.build). Each of these reads the
+// machine, not a table: sys_sample refreshes them all and is the only call that
+// walks the process list.
+extern fn sys_sample() -> bool;
+extern fn sys_cpu_usage() -> f64;                              // 0..1, since the last sample
+extern fn sys_mem_used() -> u64;                               // bytes
+extern fn sys_mem_total() -> u64;                              // bytes
+extern fn sys_load_average(index: i64) -> f64;                 // 0, 1 or 2 minutes
+extern fn sys_uptime() -> f64;                                 // seconds
+extern fn sys_disk(path: const u8[:], free: u64&, total: u64&) -> bool;
+extern fn sys_net_bytes(rx: u64&, tx: u64&) -> bool;           // cumulative bytes
+extern fn sys_process_count() -> i64;
+extern fn sys_process(i: i64, name: u8[:], cpu: f64&, mem: u64&, threads: i64&) -> bool;
+
 let HISTORY = 160;
-let PROCESSES = 7;
+let ROWS = 14;             // what the table shows
+let GIGABYTE = 1073741824.0;
 
 struct Process {
-    name: u8[..32],
+    name: u8[..40],
     cpu: f64,
-    memory: f64,
+    memory: u64,
     threads: i64,
     selected: bool,
 }
@@ -32,10 +51,19 @@ struct Monitor {
     cpu_history: f32[..HISTORY],
     memory_history: f32[..HISTORY],
     network_history: f32[..HISTORY],
-    cpu: f64,
-    memory: f64,
-    network: f64,
-    disk: f64,
+    cpu: f64,             // 0..100
+    memory: f64,          // 0..100
+    memory_used: f64,     // GB
+    memory_total: f64,    // GB
+    network: f64,         // kbit/s, received plus sent
+    net_rx: u64,          // cumulative bytes at the previous sample
+    disk_free: f64,       // GB
+    disk_total: f64,      // GB
+    load: f64,
+    uptime: f64,
+    threads: i64,
+    processes_seen: i64,
+    sampling_ok: bool,
     paused: bool,
     dark: bool,
     seconds: f64,
@@ -45,18 +73,17 @@ struct Monitor {
     processes: Process[>..],   // a growable field comes last
 }
 
+// One decimal, so a quotient of two byte counts reads as "5.8 GB" instead of
+// as the shortest round-trip form of the division.
+fn one_decimal(value: f64) -> f64 {
+    return round(value * 10.0) / 10.0;
+}
+
 fn push_history(history: f32[:], value: f64) {
     for i in 1..history.len {
         history[i - 1] = history[i];
     }
     history[history.len - 1] = value as f32;
-}
-
-// A smooth pseudo-random walk: a sum of sines with unrelated periods, which
-// looks like load without needing a random number generator or state.
-fn wave(t: f64, a: f64, b: f64, c: f64) -> f64 {
-    let v = 0.5 + 0.3 * sin(t * a) + 0.12 * sin(t * b + 1.7) + 0.08 * sin(t * c + 3.1);
-    return clamp(v, 0.0, 1.0);
 }
 
 // The log keeps the newest 200 lines in a fixed array, oldest first.
@@ -71,24 +98,89 @@ fn log_line(m: Monitor&, text: const u8[:]) {
     m.log_count += 1;
 }
 
+// One trip to the operating system: everything the panels show, refreshed.
 fn sample(m: Monitor&, dt: f64) {
     if m.paused { return; }
     m.seconds += dt;
     m.frames_seen += 1;
-    m.cpu = wave(m.seconds, 0.9, 2.3, 5.1) * 100.0;
-    m.memory = 38.0 + 22.0 * wave(m.seconds * 4.0, 0.5, 1.3, 3.1);
-    m.network = wave(m.seconds * 0.7, 1.3, 3.7, 0.9) * 940.0;
-    m.disk = wave(m.seconds * 0.3, 0.41, 1.1, 2.9) * 520.0;
+
+    let ok = sys_sample();
+    if !m.sampling_ok && ok { log_line(m, "system probes online"); }
+    if m.sampling_ok && !ok { log_line(m, "system probes stopped answering"); }
+    m.sampling_ok = ok;
+    if !ok { return; }
+
+    m.cpu = clamp(sys_cpu_usage() * 100.0, 0.0, 100.0);
+    m.memory_total = sys_mem_total() / GIGABYTE;
+    m.memory_used = sys_mem_used() / GIGABYTE;
+    m.memory = if m.memory_total > 0.0 {
+        clamp(m.memory_used / m.memory_total * 100.0, 0.0, 100.0)
+    } else {
+        0.0
+    };
+    m.load = sys_load_average(0);
+    m.uptime = sys_uptime();
+
+    // Network is cumulative, so the rate needs the previous reading.
+    var rx: u64 = 0;
+    var tx: u64 = 0;
+    if sys_net_bytes(rx, tx) {
+        let total = rx + tx;
+        if m.net_rx > 0 && total >= m.net_rx && dt > 0.0 {
+            // bytes/second to kbit/s, which is what an interface reports.
+            m.network = (total - m.net_rx) / dt * 8.0 / 1000.0;
+        }
+        m.net_rx = total;
+    }
+
+    var free: u64 = 0;
+    var total: u64 = 0;
+    if sys_disk("/", free, total) {
+        m.disk_free = free / GIGABYTE;
+        m.disk_total = total / GIGABYTE;
+    }
+
     push_history(m.cpu_history, m.cpu);
     push_history(m.memory_history, m.memory);
     push_history(m.network_history, m.network);
+    refresh_processes(m);
+}
 
-    for i in 0..m.processes.len {
-        let p = m.processes[i];
-        let phase = (i as f64) * 1.37;
-        p.cpu = clamp(p.cpu * 0.86 + wave(m.seconds + phase, 1.1, 2.7, 6.3) * 22.0, 0.0, 100.0);
-        p.memory = clamp(p.memory + (wave(m.seconds + phase, 0.23, 0.9, 1.9) - 0.5) * 3.0, 4.0, 512.0);
+// The process table is the process list of the machine, busiest first, which is
+// what sysinfo.c keeps: the top rows of it, refreshed with every sample.
+fn refresh_processes(m: Monitor&) {
+    let count = min(sys_process_count(), ROWS);
+    m.processes_seen = sys_process_count();
+    var threads = 0;
+    for i in 0..count {
+        if i >= m.processes.len {
+            m.processes.push(Process { name: [0; 40], cpu: 0.0, memory: 0,
+                                       threads: 0, selected: false });
+        }
+        // A reference, so the row is the array's own element; `let p = ...`
+        // would copy it and every assignment below would be dropped.
+        let p = &m.processes[i];
+        // The name is filled in a local array and copied in: a fixed array
+        // field of a packed struct is a value, and handing a slice of it to C
+        // would hand over a copy.
+        var name: u8[..40] = [0; 40];
+        var cpu = 0.0;
+        var memory: u64 = 0;
+        var count_threads: i64 = 0;
+        if sys_process(i, name, cpu, memory, count_threads) {
+            for j in 0..p.name.len { p.name[j] = name[j]; }
+            p.cpu = cpu * 100.0;
+            p.memory = memory;
+            p.threads = count_threads;
+        } else {
+            p.name[0] = 0;
+        }
+        threads += p.threads;
     }
+    for i in count..m.processes.len {
+        m.processes[i].name[0] = 0;
+    }
+    m.threads = threads;
 }
 
 // --- drawing helpers -----------------------------------------------------
@@ -165,6 +257,10 @@ fn stat_row(name: const u8[:], value: const u8[:], fraction: f64) {
 
 fn overview(m: Monitor&, width: f64) {
     imgui::separator_text("load");
+    if !m.sampling_ok {
+        imgui::text_colored(1.0, 0.75, 0.4, 1.0,
+                            "no system probes on this platform: showing frame timing only");
+    }
     let third = (width - 32.0) / 3.0;
     if imgui::begin_child("gauge-cpu", third, 132.0) {
         gauge("cpu", m.cpu / 100.0, str(m.cpu as i64, "%"), 38.0);
@@ -182,22 +278,46 @@ fn overview(m: Monitor&, width: f64) {
         imgui::end_child();
     }
 
-    imgui::separator_text("history");
-    imgui::text_muted("cpu, last 160 samples");
-    imgui::plot_lines("##cpu", m.cpu_history, 0.0, 100.0, width, 54.0);
-    imgui::plot_lines("##memory", m.memory_history, 0.0, 100.0, width, 38.0);
-    imgui::text_muted("network, kb/s");
-    imgui::plot_lines("##network", m.network_history, 0.0, 1000.0, width, 38.0);
+    imgui::text_muted(str("memory ", one_decimal(m.memory_used), " of ",
+                          one_decimal(m.memory_total), " GB",
+                          "   load ", one_decimal(m.load), "   up ",
+                          one_decimal(m.uptime / 3600.0), " h"));
 
-    imgui::separator_text("throughput");
-    stat_row("network", str(m.network as i64, " kb/s"), m.network / 1000.0);
-    stat_row("disk", str(m.disk as i64, " kb/s"), m.disk / 1000.0);
+    imgui::separator_text("history");
+    imgui::text_muted("cpu, last 160 samples, percent");
+    imgui::plot_lines("##cpu", m.cpu_history, 0.0, 100.0, width, 54.0);
+    imgui::text_muted("memory, percent");
+    imgui::plot_lines("##memory", m.memory_history, 0.0, 100.0, width, 38.0);
+    // The ceiling follows the data, so an idle link still shows its shape.
+    let peak = max(peer_ceiling(m), 100.0);
+    imgui::text_muted(str("network, kbit/s, peak ", peak as i64));
+    imgui::plot_lines("##network", m.network_history, 0.0, peak, width, 38.0);
+
+    imgui::separator_text("counters");
+    stat_row("network", str(m.network as i64, " kbit/s"), clamp(m.network / 10000.0, 0.0, 1.0));
+    let used = if m.disk_total > 0.0 { 1.0 - m.disk_free / m.disk_total } else { 0.0 };
+    stat_row("disk used", str(one_decimal(m.disk_total - m.disk_free), " of ",
+                              one_decimal(m.disk_total), " GB"),
+             used);
+    stat_row("threads", str(m.threads), clamp(m.threads / 400.0, 0.0, 1.0));
     let frame_ms = imgui::delta_time() * 1000.0;
     stat_row("frame", str(frame_ms, " ms"), clamp(frame_ms / 16.7, 0.0, 1.0));
 }
 
+fn peak_of(values: const f32[:]) -> f64 {
+    var peak = 0.0;
+    for i in 0..values.len { peak = max(peak, values[i]); }
+    return peak;
+}
+
+// A plot ceiling a little above the peak, so a spike does not touch the top.
+fn peer_ceiling(m: Monitor&) -> f64 {
+    return one_decimal(peak_of(m.network_history) * 1.15);
+}
+
 fn process_table(m: Monitor&, width: f64) {
-    imgui::separator_text("processes");
+    imgui::separator_text(str("processes, busiest ", min(m.processes_seen, ROWS), " of ",
+                              m.processes_seen));
     let flags = imgui::TABLE_BORDERS | imgui::TABLE_ROW_BG | imgui::TABLE_RESIZABLE;
     if imgui::begin_table("processes", 4, flags) {
         imgui::table_setup_column("name", imgui::WIDTH_STRETCH);
@@ -206,7 +326,8 @@ fn process_table(m: Monitor&, width: f64) {
         imgui::table_setup_column("threads", imgui::WIDTH_FIXED, 66.0);
         imgui::table_headers_row();
         for i in 0..m.processes.len {
-            let p = m.processes[i];
+            let p = &m.processes[i];
+            if p.name[0] == 0 { continue; }
             imgui::table_next_row();
             imgui::table_next_column();
             if imgui::selectable(p.name[0..text_len(p.name)], p.selected,
@@ -222,7 +343,7 @@ fn process_table(m: Monitor&, width: f64) {
                 imgui::text(str(p.cpu as i64, "%"));
             }
             imgui::table_next_column();
-            imgui::text(str(p.memory as i64, " MB"));
+            imgui::text(str(p.memory / 1048576, " MB"));
             imgui::table_next_column();
             imgui::text(str(p.threads));
         }
@@ -261,8 +382,17 @@ fn main() {
         network_history: [0.0; HISTORY],
         cpu: 0.0,
         memory: 0.0,
+        memory_used: 0.0,
+        memory_total: 0.0,
         network: 0.0,
-        disk: 0.0,
+        net_rx: 0,
+        disk_free: 0.0,
+        disk_total: 0.0,
+        load: 0.0,
+        uptime: 0.0,
+        threads: 0,
+        processes_seen: 0,
+        sampling_ok: false,
         log: [[0; 120]; 200],
         log_count: 0,
         processes: [],
@@ -271,30 +401,22 @@ fn main() {
         seconds: 0.0,
         frames_seen: 0,
     };
-    // A few seconds of history, so the first frame already shows a plot.
-    m.seconds = 0.0;
-    for i in 0..HISTORY {
-        m.seconds += 0.02;
-        push_history(m.cpu_history, wave(m.seconds, 0.9, 2.3, 5.1) * 100.0);
-        push_history(m.memory_history, 38.0 + 22.0 * wave(m.seconds * 4.0, 0.5, 1.3, 3.1));
-        push_history(m.network_history, wave(m.seconds * 0.7, 1.3, 3.7, 0.9) * 940.0);
-    }
-    let names = ["radiant", "walker", "networkd", "audio", "render", "script", "indexer"];
-    for i in 0..PROCESSES {
-        var p = Process { name: [0; 32], cpu: 0.0, memory: 0.0, threads: 0, selected: false };
-        let name = names[i];
-        for j in 0..name.len { p.name[j] = name[j]; }
-        p.cpu = 4.0 + i * 6.0;
-        p.memory = 48.0 + i * 24.0;
-        p.threads = 2 + i * 3;
-        m.processes.push(p);
-    }
     log_line(m, "monitor started");
-    log_line(m, "sampling frame time, load and process table");
-    log_line(m, "7 processes, 3 gauges, 160 samples of history");
-    log_line(m, "select a process to see it named here");
-    // One sample before the first frame, so the gauges start at a real value.
+    log_line(m, str("probes: ", imgui::driver(), " on this machine, 160 samples of history"));
+    // Two samples before the first frame: the second one has a previous reading
+    // to difference against, so CPU and network start at real rates instead of
+    // at zero. The gap is the monitor's own sample spacing.
     sample(m, 1.0 / 60.0);
+    // Fill the plot with real samples taken a few milliseconds apart, so the
+    // window opens with a history instead of a flat line. Same probes, same
+    // maths, only a shorter interval than the frame loop uses.
+    for i in 0..80 {
+        sleep_ms(12);
+        sample(m, 0.012);
+    }
+    log_line(m, str(m.processes_seen, " processes, ", one_decimal(m.memory_total),
+                    " GB of memory"));
+    log_line(m, "select a process to see it named here");
 
     imgui::set_next_window_pos(8.0, 8.0, imgui::ALWAYS);
     imgui::set_next_window_size(options.width - 16.0, options.height - 16.0, imgui::ALWAYS);

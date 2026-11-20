@@ -1476,3 +1476,4 @@ extern fn igs_internal_style_scale_all_sizes(scale: f32);
 extern fn igs_internal_load_font(path: const u8[:], size_px: f32) -> bool;
 extern fn igs_internal_enable_viewports(on: bool);
 extern fn igs_internal_render_platform_windows();
+extern fn igs_internal_window_stack_depth() -> i64;

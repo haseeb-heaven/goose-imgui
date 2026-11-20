@@ -8,7 +8,7 @@ afternoon when something does not line up.
 
 ```
 your program (Goose)
-   │  import imgui from "goose-imgui"      typed API: imgui.goose, src/widgets.goose
+   │  import imgui from "<repo>@<ref>"       typed API: imgui.goose, src/widgets.goose
    ▼
 raw.goose                                  one extern fn per C entry point
    │  extern fn igs_slider_f64(...)        (generated: scripts/generate_bindings.py)
@@ -92,7 +92,7 @@ behind the array is untouched.
   always passed explicitly: `igs_slider_f64_n(label, v, n, lo, hi)`, `igs_color_edit(label,
   v, n)`. `n` is clamped (2..4 for sliders, 3..4 for colours) before anything is read.
 * **Growable fields come last** in a struct, and a struct may have only one
-  (`demos/node_graph` keeps two fixed arrays with counts instead).
+  (`examples/node_graph` keeps two fixed arrays with counts instead).
 * **Mutually recursive functions need `recursive fn`** — the calculator's expression
   parser is written that way.
 * **`defer` runs on every exit**, which is why `window { }`, `child { }` and `table { }`
@@ -275,12 +275,42 @@ with `--shot`, and check the file is not empty.
   null current window.
 * **A window that quits must still be closed**: `imgui::quit()` is checked at the top of
   the next `frame()`, and every `begin_*` has its matching `end_*` via `defer`.
+* **`let x = array[i]` copies the element.** To change one in place — a node being
+  dragged, a row whose checkbox was clicked — take a reference: `let x = &array[i]`.
+  Writing to the copy compiles, runs, and changes nothing, which is exactly the kind of
+  bug that looks like a widget doing nothing. The two cases that need it in the examples
+  are `node_graph`'s drag and inspector, and `system_monitor`'s process rows.
+* **The same goes for a slice of a fixed array field**: `p.name` passed to C writes
+  through only when `p` is a place (an index or a reference), because a field read from a
+  copied struct is a value.
 
-## 9. Working on the package
+## 9. A program with C of its own
+
+`examples/system_monitor` reads the machine it runs on, and that means system calls the
+Goose side cannot make. Its C is one file, compiled with the program by a sidecar beside
+the root file (docs/packages.md §3):
+
+```
+examples/system_monitor/main.goose    extern fn sys_sample(); ...  -- what it may call
+examples/system_monitor/main.build    c_sources = ["sysinfo.c"];
+examples/system_monitor/sysinfo.c     mach/sysctl/libproc on macOS, /proc on Linux
+```
+
+`sys_sample()` refreshes everything and walks the process list; `sys_process(i, name, ...)`
+fills 40-byte names and the CPU rate of the top rows. The CPU rate is a delta of each
+pid's CPU time against the previous sample, which is why the monitor calls `sys_sample`
+once per frame rather than once per redraw.
+
+A `u8[:]` parameter arrives in C as `{data, len}` and a `T&` as a pointer, the same rules
+as the binding's own shim, so the store helpers there (`memcpy` per element) are the right
+pattern here too: a field of a packed struct is not aligned, and the last element is the
+last element.
+
+## 10. Working on the package
 
 ```sh
 sh scripts/run_tests.sh            # bindings check, JIT checks, native checks
-sh scripts/screenshots.sh          # rebuild the demos and their screenshots
+sh scripts/screenshots.sh          # rebuild the examples and their screenshots
 python3 scripts/generate_bindings.py --check
 clang-format -i native/goose_imgui_shim.cpp native/goose_imgui_internal.cpp \
                  native/goose_imgui_shim.h native/goose_imgui_internal.h
@@ -292,7 +322,7 @@ dear_bindings from the Dear ImGui release named in `native/cimgui/imgui/imgui.h`
 Running a demo with a real window is the check the tests cannot do:
 
 ```sh
-goose build demos/showcase/main.goose && ./demos/showcase/main
+goose build examples/showcase/main.goose && ./examples/showcase/main
 ```
 
 The window opens, the demo runs until you close it, and input, clipboard, DPI and

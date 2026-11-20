@@ -1,4 +1,4 @@
-// demos/node_graph/main.goose — a node graph editor on a custom canvas.
+// examples/node_graph/main.goose — a node graph editor on a custom canvas.
 //
 // The canvas is drawn entirely with the draw list: a grid that follows the
 // view, rounded node cards with title bars and ports, and bezier links with a
@@ -6,9 +6,9 @@
 // left button, drag the background to pan, scroll to zoom, click a node to
 // inspect it in the side panel, press A to add one and Delete to remove one.
 //
-//     goose build demos/node_graph/main.goose
-//     ./demos/node_graph/main
-//     ./demos/node_graph/main --shot screenshots/node_graph.png --frames 30
+//     goose build examples/node_graph/main.goose
+//     ./examples/node_graph/main
+//     ./examples/node_graph/main --shot screenshots/node_graph.png --frames 30
 
 import imgui from "../..";
 import imgui.raw;
@@ -319,7 +319,9 @@ fn canvas(g: Graph&, width: f64, height: f64) {
     }
     if g.dragging >= 0 {
         if imgui::mouse_down(raw::mouse_button_left) && g.dragging < g.node_count {
-            let node = g.nodes[g.dragging];
+            // A reference, not a copy: `let node = g.nodes[i]` would move a
+            // struct into a local and drop the change at the end of the block.
+            let node = &g.nodes[g.dragging];
             node.x += delta[0] / g.zoom;
             node.y += delta[1] / g.zoom;
         } else {
@@ -406,7 +408,8 @@ fn inspector(g: Graph&) {
     if g.selected < 0 || g.selected >= g.node_count {
         imgui::text_muted("click a node to inspect it");
     } else {
-        let node = g.nodes[g.selected];
+        // A reference, so the widgets below edit the node itself.
+        let node = &g.nodes[g.selected];
         imgui::text(str("node ", g.selected, " | ", kind_name(node.kind)));
         imgui::set_next_item_width(180.0);
         if imgui::input_text("##title", node.title, 0) {}
@@ -433,6 +436,16 @@ fn inspector(g: Graph&) {
 }
 
 // --- window --------------------------------------------------------------
+
+// The canvas is the window less the side panel, its padding and its
+// scrollbar-less border: fit into what is really left.
+fn canvas_width(options: support::Options&) -> f64 {
+    return options.width - 316.0;
+}
+
+fn canvas_height(options: support::Options&) -> f64 {
+    return options.height - 118.0;
+}
 
 fn seed(g: Graph&) {
     let a = add_node(g, "camera", 30.0, 130.0, 0);
@@ -470,9 +483,7 @@ fn main() {
     };
     seed(g);
     // Fit the seeded graph into the canvas the first frame will draw.
-    // The canvas is the window less the side panel, its padding and its
-    // scrollbar-less border: fit into what is really left.
-    fit(g, options.width - 316.0, options.height - 118.0);
+    fit(g, canvas_width(options), canvas_height(options));
 
     imgui::set_next_window_pos(8.0, 8.0, imgui::ALWAYS);
     imgui::set_next_window_size(options.width - 16.0, options.height - 16.0, imgui::ALWAYS);
@@ -505,9 +516,7 @@ fn main() {
                 say(g, "removed the selected node");
             }
             if imgui::key_pressed(raw::key_f) {
-                // The canvas is the window less the side panel, its padding and its
-    // scrollbar-less border: fit into what is really left.
-    fit(g, options.width - 316.0, options.height - 118.0);
+                fit(g, canvas_width(options), canvas_height(options));
                 say(g, "fitted the graph to the view");
             }
         }

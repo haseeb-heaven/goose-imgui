@@ -119,4 +119,9 @@ void igs_internal_render_platform_windows(void) {
     }
 }
 
+int64_t igs_internal_window_stack_depth(void) {
+    ImGuiContext *ctx = ImGui::GetCurrentContext();
+    return ctx ? (int64_t)ctx->CurrentWindowStack.Size : 0;
+}
+
 } // extern "C"

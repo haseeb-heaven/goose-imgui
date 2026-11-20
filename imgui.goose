@@ -277,16 +277,28 @@ fn begin_window(title: const u8[:]) -> bool {
     return begin_window(title, 0);
 }
 
+// Dear ImGui requires the matching End() even when Begin() returns false: a
+// collapsed or clipped window still pushes and pops the window stack. Since
+// callers write `if begin_window(...) { ...; end_window(); }`, the close
+// happens here instead, in the case the caller does not reach.
 fn begin_window(title: const u8[:], flags: i64) -> bool {
     let open = raw::igs_begin(title, 0, flags as i32);
-    if open { window_depth += 1; }
+    if open {
+        window_depth += 1;
+    } else {
+        raw::igs_end();
+    }
     return open;
 }
 
 // A window with a close button whose state lives in `open`.
 fn begin_window_open(title: const u8[:], open: bool&, flags: i64) -> bool {
     let shown = raw::igs_begin_open(title, open, flags);
-    if shown { window_depth += 1; }
+    if shown {
+        window_depth += 1;
+    } else {
+        raw::igs_end();
+    }
     return shown;
 }
 
@@ -319,20 +331,27 @@ fn window<F>(title: const u8[:], flags: i64) {
     }
 }
 
+// A child region. Like Begin(), BeginChild() needs its EndChild() even when it
+// returns false -- a child scrolled or clipped out of view still enters the
+// window stack -- so this closes it whenever the caller will not reach its own
+// `end_child()`. Without that, an offscreen child leaks one stack level every
+// frame and Dear ImGui starts reporting "Missing End()".
 fn begin_child(id: const u8[:], width: f64, height: f64) -> bool {
-    return raw::igs_begin_child(id, width as f32, height as f32, 0, 0);
+    return begin_child(id, width, height, 0, 0);
 }
 
 fn begin_child(id: const u8[:], width: f64, height: f64, flags: i64) -> bool {
-    return raw::igs_begin_child(id, width as f32, height as f32, flags as i32, 0);
+    return begin_child(id, width, height, flags, 0);
 }
 
 // The full form: child flags (a border, a resize grip) and window flags (no
 // scrollbar, no scrolling with the wheel) for a region that draws itself.
 fn begin_child(id: const u8[:], width: f64, height: f64, child_flags: i64,
                window_flags: i64) -> bool {
-    return raw::igs_begin_child(id, width as f32, height as f32, child_flags as i32,
-                                window_flags as i32);
+    let open = raw::igs_begin_child(id, width as f32, height as f32, child_flags as i32,
+                                    window_flags as i32);
+    if !open { raw::igs_end_child(); }
+    return open;
 }
 
 fn end_child() {
@@ -361,6 +380,11 @@ fn set_next_window_pos(x: f64, y: f64, cond: i64) {
 fn set_next_window_pos(x: f64, y: f64, cond: i64, pivot_x: f64, pivot_y: f64) {
     raw::igs_set_next_window_pos_pivot(x as f32, y as f32, cond as i32, pivot_x as f32,
                                        pivot_y as f32);
+}
+
+// Collapses the next window to its title bar (or expands it again).
+fn set_next_window_collapsed(collapsed: bool, cond: i64) {
+    raw::igs_set_next_window_collapsed(collapsed, cond as i32);
 }
 
 fn set_next_window_size(x: f64, y: f64, cond: i64) {
@@ -654,7 +678,7 @@ fn pop_style_color() {
 
 // A fixed-capacity text input. `buf` is the program's own byte array; the
 // bytes up to the first NUL are the text. See widgets::text_field for the
-// grow-once-then-edit form the demos use.
+// grow-once-then-edit form the examples use.
 fn input_text(label: const u8[:], buf: u8[:], flags: i64) -> bool {
     return raw::igs_input_text(label, buf, flags);
 }

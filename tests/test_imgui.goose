@@ -350,6 +350,43 @@ fn test_closures() {
     check_eq(sections, 1, "widgets::section runs its body once");
 }
 
+// Dear ImGui requires End()/EndChild() even when Begin()/BeginChild() returned
+// false, and callers only reach their own close when it returned true. A child
+// that is scrolled or clipped out of view is the everyday case, and leaking it
+// makes the next frame report "Missing End()" for the rest of the session.
+fn test_container_end_balance() {
+    check(imgui::frame(), "frame() for the end-balance pass");
+    imgui::set_next_window_pos(0.0, 0.0, imgui::ALWAYS);
+    imgui::set_next_window_size(220.0, 140.0, imgui::ALWAYS);
+    var child_opened = true;
+    if imgui::begin_window("end balance") {
+        // Push the child out of the window's clip rectangle: BeginChild then
+        // returns false, and the caller never reaches its own end_child().
+        imgui::dummy(0.0, 400.0);
+        child_opened = imgui::begin_child("clipped", 100.0, 100.0);
+        if child_opened { imgui::end_child(); }
+        imgui::end_window();
+    }
+    imgui::end_frame();
+    check(!child_opened, "a child clipped out of view does not open");
+    check_eq(raw::igs_internal_window_stack_depth(), 0,
+             "a child the caller cannot close is closed by the binding");
+
+    // The same for a window: Begin() answers false for a collapsed one, so its
+    // End() has to happen in the binding. Collapsing takes effect a frame later.
+    check(imgui::frame(), "frame() for the collapsed pass");
+    imgui::set_next_window_collapsed(true, imgui::ALWAYS);
+    var window_opened = false;
+    if imgui::begin_window("end balance") {
+        window_opened = true;
+        imgui::end_window();
+    }
+    imgui::end_frame();
+    check(!window_opened, "a collapsed window does not open");
+    check_eq(raw::igs_internal_window_stack_depth(), 0,
+             "a window the caller cannot close is closed by the binding");
+}
+
 fn test_restart() {
     imgui::shutdown();
     check(!imgui::ready(), "shutdown clears the context");
@@ -373,6 +410,7 @@ fn main() {
     test_input_state();
     test_scrolling();
     test_closures();
+    test_container_end_balance();
     test_restart();
 
     if failures > 0 {

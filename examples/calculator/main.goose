@@ -1,13 +1,13 @@
-// demos/calculator/main.goose — a scientific/programmer calculator.
+// examples/calculator/main.goose — a scientific/programmer calculator.
 //
 // A complete little application rather than a widget gallery: an expression
 // field with a real recursive-descent evaluator, a keypad, a tape of past
 // results, a bit view for programming work and a light/dark theme toggle.
 //
-//     goose build demos/calculator/main.goose
-//     ./demos/calculator/main
+//     goose build examples/calculator/main.goose
+//     ./examples/calculator/main
 //
-//     ./demos/calculator/main --shot screenshots/calculator.png --frames 30
+//     ./examples/calculator/main --shot screenshots/calculator.png --frames 30
 //
 // The second form renders offscreen, captures a real frame to PNG and exits;
 // that is how screenshots/calculator.png was produced.

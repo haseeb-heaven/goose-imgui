@@ -38,6 +38,13 @@ void igs_internal_enable_viewports(bool on);
 // goose: fn igs_internal_render_platform_windows()
 void igs_internal_render_platform_windows(void);
 
+/* How many Begin/BeginChild scopes Dear ImGui thinks are open: 1 is a clean
+ * frame (the window being built), more means a container was never closed and
+ * the next NewFrame will report "Missing End()". Tests use it to prove the
+ * binding closes a container even when its Begin returned false. */
+// goose: fn igs_internal_window_stack_depth() -> i64
+int64_t igs_internal_window_stack_depth(void);
+
 #ifdef __cplusplus
 }
 #endif

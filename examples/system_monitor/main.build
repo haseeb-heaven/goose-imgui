@@ -1,0 +1,5 @@
+// The monitor reads the machine it runs on: CPU, memory, network, disk and the
+// busiest processes come from the operating system through sysinfo.c (mach and
+// libproc on macOS, /proc on Linux). It is small, plain C, and compiled with
+// the program.
+c_sources = ["sysinfo.c"];

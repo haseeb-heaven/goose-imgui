@@ -1,4 +1,4 @@
-// demos/support/support.goose — command line and screen-capture plumbing that
+// examples/support/support.goose — command line and screen-capture plumbing that
 // every demo shares, so each demo file is about its own UI and nothing else.
 namespace support;
 

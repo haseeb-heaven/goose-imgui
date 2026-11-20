@@ -1,13 +1,13 @@
-// demos/showcase/main.goose — every corner of the binding, in one window.
+// examples/showcase/main.goose — every corner of the binding, in one window.
 //
 // One tab per corner of Dear ImGui: controls, layout, text, data, canvas and
 // dialogs. It is the demo to run when you want to know what this binding
 // exposes and how a call looks.
 //
-//     goose build demos/showcase/main.goose
-//     ./demos/showcase/main                                       # window
-//     ./demos/showcase/main --shot screenshots/showcase.png --frames 30
-//     ./demos/showcase/main --size 1280x800 --frames 3             # offscreen only
+//     goose build examples/showcase/main.goose
+//     ./examples/showcase/main                                       # window
+//     ./examples/showcase/main --shot screenshots/showcase.png --frames 30
+//     ./examples/showcase/main --size 1280x800 --frames 3             # offscreen only
 
 import imgui from "../..";
 import imgui.raw;

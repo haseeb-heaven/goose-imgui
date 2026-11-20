@@ -8,14 +8,11 @@
 Dear ImGui for the [Goose](https://github.com/treeform/goose) language: immediate-mode
 GUI on SDL3 and **SDL_GPU**, with no CMake to run and no code to generate by hand.
 
-Clone it wherever your Goose packages live, and import it:
-
-```sh
-git clone https://github.com/haseeb-heaven/goose-imgui
-```
+Import it straight from the repository — the compiler fetches it at that ref, builds its
+C with CMake and caches both:
 
 ```goose
-import imgui from "path/to/goose-imgui";
+import imgui from "https://github.com/haseeb-heaven/goose-imgui@develop";
 
 fn main() {
     if !imgui::init("hello", 480, 240) { return; }
@@ -37,19 +34,47 @@ fn main() {
 goose build hello.goose && ./hello
 ```
 
-That is the whole setup: `goose build` configures and builds the native half with CMake
-for you (via the package's `imgui.build` sidecar), links SDL3, Dear ImGui and the shim,
-and runs.
+That is the whole setup: `goose build` fetches the package, configures and builds the
+native half with CMake for you (via the package's `imgui.build` sidecar), links SDL3, Dear
+ImGui and the shim, and runs.
+
+`@develop` follows the branch the work happens on; `@master` is the stable line, and a tag
+or a commit pins a build that does not move under you:
+
+```goose
+import imgui from "https://github.com/haseeb-heaven/goose-imgui@master";   // stable
+import imgui from "https://github.com/haseeb-heaven/goose-imgui@v1.0.0";  // pinned
+```
+
+Working on the binding itself, clone the repository and import the directory — nothing is
+copied, so edits take effect on the next build:
+
+```sh
+git clone https://github.com/haseeb-heaven/goose-imgui
+```
+
+```goose
+import imgui from "goose-imgui";        // a directory, used in place
+```
 
 | | |
 |---|---|
 | ![calculator](screenshots/calculator.png) | ![showcase](screenshots/showcase.png) |
 | **calculator** — expression evaluator, keypad, history tape, programmer bit view | **showcase** — controls, layout, text, data, canvas and dialogs |
 | ![system monitor](screenshots/system_monitor.png) | ![node graph](screenshots/node_graph.png) |
-| **system monitor** — ring gauges, rolling plots, process table, log | **node graph** — zoomable canvas, node dragging, bezier links with pulses |
+| **system monitor** — this machine's real CPU, memory, network and processes | **node graph** — zoomable canvas, node dragging, bezier links with pulses |
 
-Every screenshot above is the demo's own output: each program renders offscreen, runs
-thirty frames and writes the frame it just drew as a PNG with `imgui::screenshot`.
+Every screenshot above is the program's own output: each example renders offscreen, runs
+thirty frames and writes the frame it just drew as a PNG with `imgui::screenshot`. The
+system monitor is showing the machine that took the picture, not sample data — CPU load,
+memory, network rate, free disk, load average and the process table all come from
+`getloadavg`/mach/`sysctl`/`libproc` on macOS and `/proc` on Linux, through the example's
+own `sysinfo.c` (compiled with it by `main.build`).
+
+The smallest one is worth reading first — `examples/hello`, the quickstart above with the
+shared argument parsing, thirty lines in total:
+
+![hello](screenshots/hello.png)
 
 ## What you get
 
@@ -153,10 +178,24 @@ native/goose_imgui_shim.{h,cpp}   the hand-written C ABI: values, buffers, PNG, 
 native/goose_imgui_internal.{h,cpp}  the docking builder, style and DPI bits
 native/generated/        per-function C wrappers generated from the metadata
 scripts/generate_bindings.py      regenerates raw.goose and native/generated/
-scripts/screenshots.sh            builds the demos and captures screenshots/
-demos/{calculator,showcase,system_monitor,node_graph}/
+scripts/screenshots.sh            builds the examples and captures screenshots/
+examples/support/support.goose    the CLI and screenshot plumbing every example shares
+examples/{calculator,showcase,system_monitor,node_graph}/   runnable programs
+examples/system_monitor/{main.build,sysinfo.c}   that program's own C: the OS probes
 tests/test_imgui.goose   77 checks, offscreen, no display needed
 ```
+
+Every runnable program in this repository lives in `examples/`, one directory per program
+with its `main.goose`, and the `support` module they share beside them. Build one straight
+from the repository root:
+
+```sh
+goose build examples/showcase/main.goose && ./examples/showcase/main
+goose build examples/node_graph/main.goose && ./examples/node_graph/main
+```
+
+Each accepts `--size WxH`, `--frames N`, `--shot out.png` and `--headless`, so the same
+binary can open a window or render a deterministic frame for a screenshot.
 
 A package's root file has to sit beside its siblings, so the typed API is `imgui.goose`
 at the package root rather than `src/imgui.goose`: Goose resolves `import imgui.raw`
