@@ -1,0 +1,8 @@
+# Build outputs. `goose build` puts a binary beside its source, and the demos
+# and the self-checks are both sources.
+demos/*/main
+tests/test_imgui
+*.exe
+*.pdb
+*.o
+*.a

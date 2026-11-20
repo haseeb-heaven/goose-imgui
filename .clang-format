@@ -1,0 +1,15 @@
+# The hand-written half of goose-imgui, formatted like the Goose compiler's own
+# C: 4 spaces, 100 columns. native/cimgui is vendored and not formatted.
+#
+# Comments are never reflowed: a `// goose: fn ...` line above a declaration is
+# the signature the generator reads, so it has to stay on one line however long
+# it gets.
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 100
+ReflowComments: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: WithoutElse
+DerivePointerAlignment: false
+PointerAlignment: Right
+IncludeBlocks: Preserve

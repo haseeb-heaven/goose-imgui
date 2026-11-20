@@ -1,0 +1,8 @@
+// The package's native part: Dear ImGui (docking), dear_bindings' C API, the
+// SDL3 platform and SDL_GPU3 renderer backends, and the C ABI shim, one CMake
+// project (CMakeLists.txt beside this file) whose target imgui_goose carries
+// them all. Goose configures and builds it, so nothing else runs CMake.
+cmake_target = "imgui_goose";
+// Windows are created, drawn and presented on the thread that is calling;
+// an ImGui context is not shareable.
+main_thread_only = true;
